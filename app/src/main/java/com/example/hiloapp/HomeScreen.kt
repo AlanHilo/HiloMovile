@@ -4,7 +4,9 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -22,13 +24,22 @@ import androidx.compose.ui.unit.sp
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    chats: List<Chat>, // Monitored chats only
-    allChats: List<Chat>, // All chats from WhatsApp
+    chats: List<Chat>,
+    allChats: List<Chat>,
     isLoading: Boolean = false,
+    isLoadingAllChats: Boolean = false,
     aiChatViewModel: AiChatViewModel,
+    alertsViewModel: AlertsViewModel,
+    summariesViewModel: SummariesViewModel,
     onChatClick: (Chat) -> Unit,
     onToggleMonitor: (Chat, Boolean) -> Unit,
-    onLoadAllChats: () -> Unit,
+    onToggleAiAutoReply: (Chat, Boolean) -> Unit = { _, _ -> },
+    onSyncHistory: (Chat, (Boolean) -> Unit) -> Unit = { _, cb -> cb(false) },
+    isPartialList: Boolean = false,
+    openWaHealthMessage: String? = null,
+    isRestartingServices: Boolean = false,
+    onRetryLoadChats: () -> Unit = {},
+    onRestartServices: ((onDone: (Boolean, String?) -> Unit) -> Unit)? = null,
     onLogout: () -> Unit
 ) {
     var selectedTabIndex by remember { mutableIntStateOf(0) }
@@ -70,10 +81,24 @@ fun HomeScreen(
                     )
                     NavigationBarItem(
                         icon = {
-                            Icon(
-                                if (selectedTabIndex == 1) Icons.Filled.Settings else Icons.Outlined.Settings,
-                                contentDescription = "Monitor"
-                            )
+                            BadgedBox(
+                                badge = {
+                                    if (chats.isNotEmpty()) {
+                                        Badge(
+                                            containerColor = Color(0xFF10B981),
+                                            contentColor = Color.White
+                                        ) {
+                                            val countLabel = if (chats.size > 99) "99+" else chats.size.toString()
+                                            Text(countLabel, fontSize = 10.sp)
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    if (selectedTabIndex == 1) Icons.Filled.Settings else Icons.Outlined.Settings,
+                                    contentDescription = "Monitor"
+                                )
+                            }
                         },
                         label = {
                             Text(
@@ -116,6 +141,54 @@ fun HomeScreen(
                             indicatorColor = Color(0xFFE6F4EA)
                         )
                     )
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                Icons.Filled.NotificationsActive,
+                                contentDescription = "Alertas"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Alertas",
+                                fontWeight = if (selectedTabIndex == 3) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 12.sp
+                            )
+                        },
+                        selected = selectedTabIndex == 3,
+                        onClick = { selectedTabIndex = 3 },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color(0xFF10B981),
+                            selectedTextColor = Color(0xFF10B981),
+                            unselectedIconColor = Color(0xFF8E8E93),
+                            unselectedTextColor = Color(0xFF8E8E93),
+                            indicatorColor = Color(0xFFE6F4EA)
+                        )
+                    )
+                    NavigationBarItem(
+                        icon = {
+                            Icon(
+                                Icons.Filled.Article,
+                                contentDescription = "Resúmenes"
+                            )
+                        },
+                        label = {
+                            Text(
+                                "Resumen",
+                                fontWeight = if (selectedTabIndex == 4) FontWeight.SemiBold else FontWeight.Normal,
+                                fontSize = 12.sp
+                            )
+                        },
+                        selected = selectedTabIndex == 4,
+                        onClick = { selectedTabIndex = 4 },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color(0xFF10B981),
+                            selectedTextColor = Color(0xFF10B981),
+                            unselectedIconColor = Color(0xFF8E8E93),
+                            unselectedTextColor = Color(0xFF8E8E93),
+                            indicatorColor = Color(0xFFE6F4EA)
+                        )
+                    )
                 }
             }
         }
@@ -136,18 +209,42 @@ fun HomeScreen(
                     )
                 }
                 1 -> {
-                    LaunchedEffect(Unit) {
-                        onLoadAllChats()
-                    }
                     MonitorListScreen(
                         chats = allChats,
                         onToggleMonitor = onToggleMonitor,
+                        onToggleAiAutoReply = onToggleAiAutoReply,
+                        onSyncHistory = onSyncHistory,
+                        isPartialList = isPartialList,
+                        openWaHealthMessage = openWaHealthMessage,
+                        isLoading = isLoadingAllChats,
+                        isRestartingServices = isRestartingServices,
+                        onRetryLoadChats = onRetryLoadChats,
+                        onRestartServices = onRestartServices,
                         modifier = Modifier.padding(paddingValues)
                     )
                 }
                 2 -> {
+                    LaunchedEffect(Unit) {
+                        aiChatViewModel.loadHistory()
+                    }
                     AiChatScreen(
                         aiChatViewModel = aiChatViewModel,
+                        modifier = Modifier.padding(paddingValues)
+                    )
+                }
+                3 -> {
+                    AlertsScreen(
+                        alertsViewModel = alertsViewModel,
+                        modifier = Modifier.padding(paddingValues)
+                    )
+                }
+                4 -> {
+                    LaunchedEffect(allChats) {
+                        summariesViewModel.loadSummaries(allChats.filter { it.isMonitored })
+                    }
+                    SummariesScreen(
+                        summariesViewModel = summariesViewModel,
+                        monitoredChats = allChats,
                         modifier = Modifier.padding(paddingValues)
                     )
                 }

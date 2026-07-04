@@ -1,6 +1,8 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -72,10 +74,23 @@ dependencies {
     // DataStore for session persistence
     implementation("androidx.datastore:datastore-preferences:1.1.4")
 
+    // Room — local SQLite database for offline message cache
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
     // ViewModel + Lifecycle
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.1")
 
     // Navigation Compose
     implementation("androidx.navigation:navigation-compose:2.9.0")
+
+    // Socket.IO — WebSocket real-time events (replaces HTTP polling)
+    implementation(libs.socketio.client)
+
+    // Firebase Cloud Messaging — push notifications
+    // NOTE: Requires google-services.json in app/ directory
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 }

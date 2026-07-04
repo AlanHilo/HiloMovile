@@ -43,6 +43,7 @@ fun ChatListContent(
 ) {
     var engineStatus by remember { mutableStateOf("ready") }
     var startingEngine by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var showLogoutDialog by remember { mutableStateOf(false) }
     val coroutineScope = rememberCoroutineScope()
 
@@ -138,7 +139,10 @@ fun ChatListContent(
                         onClick = {
                             startingEngine = true
                             coroutineScope.launch {
-                                HiloApi.startWhatsAppEngine()
+                                val res = HiloApi.startWhatsAppEngine()
+                                if (res is NetworkResult.Error) {
+                                    errorMessage = res.message
+                                }
                                 delay(2000)
                                 startingEngine = false
                             }
@@ -151,6 +155,22 @@ fun ChatListContent(
                         Text(if (startingEngine) "Iniciando..." else "Iniciar Motor", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
+            }
+        }
+
+        if (!errorMessage.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .background(Color(0xFFFFE6E6), shape = RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = errorMessage ?: "",
+                    color = Color(0xFF8A1C1C),
+                    fontSize = 12.sp
+                )
             }
         }
 

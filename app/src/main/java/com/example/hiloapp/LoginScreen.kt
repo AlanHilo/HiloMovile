@@ -210,7 +210,7 @@ fun LoginScreen(
                                 pressedElevation = 8.dp
                             )
                         ) {
-                            Text("CONECTAR E INICIAR SESIÓN", fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
+                            Text("INICIAR SESIÓN", fontWeight = FontWeight.Bold, color = Color.White, letterSpacing = 0.5.sp)
                         }
                         
                         Spacer(modifier = Modifier.height(16.dp))

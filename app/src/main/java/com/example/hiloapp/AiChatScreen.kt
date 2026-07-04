@@ -1,5 +1,13 @@
 package com.example.hiloapp
 
+import android.Manifest
+import android.content.Intent
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.speech.tts.TextToSpeech
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.*
@@ -9,7 +17,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -43,14 +56,64 @@ fun AiChatScreen(
     aiChatViewModel: AiChatViewModel,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
     val messages by aiChatViewModel.messages.collectAsState()
     val isAiTyping by aiChatViewModel.isAiTyping.collectAsState()
     var inputText by remember { mutableStateOf("") }
+    var voiceEnabled by remember { mutableStateOf(true) }
+    var isListening by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted && speechRecognizer != null) {
+            startSpeechListening(
+                recognizer = speechRecognizer!!,
+                onListening = { isListening = it },
+                onText = { spoken ->
+                    if (spoken.isNotBlank()) {
+                        inputText = spoken
+                        aiChatViewModel.sendMessage(spoken)
+                    }
+                }
+            )
+        }
+    }
 
     LaunchedEffect(messages.size, isAiTyping) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.size + (if (isAiTyping) 1 else 0) - 1)
+        }
+    }
+
+    DisposableEffect(Unit) {
+        if (SpeechRecognizer.isRecognitionAvailable(context)) {
+            val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
+            speechRecognizer = recognizer
+        }
+        val speaker = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("es", "MX")
+            }
+        }
+        tts = speaker
+        onDispose {
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+            tts?.stop()
+            tts?.shutdown()
+            tts = null
+        }
+    }
+
+    LaunchedEffect(messages.size, voiceEnabled) {
+        if (!voiceEnabled || isAiTyping || messages.isEmpty()) return@LaunchedEffect
+        val last = messages.lastOrNull() ?: return@LaunchedEffect
+        if (!last.isFromUser && last.id != "welcome") {
+            tts?.speak(last.text, TextToSpeech.QUEUE_FLUSH, null, "hilo_ai_reply")
         }
     }
 
@@ -91,6 +154,15 @@ fun AiChatScreen(
                                 fontWeight = FontWeight.Medium
                             )
                         }
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { voiceEnabled = !voiceEnabled }) {
+                        Icon(
+                            imageVector = if (voiceEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
+                            contentDescription = if (voiceEnabled) "Voz activada" else "Voz desactivada",
+                            tint = if (voiceEnabled) Color(0xFF10B981) else Color(0xFF8E8E93)
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -151,6 +223,32 @@ fun AiChatScreen(
                 )
                 FloatingActionButton(
                     onClick = {
+                        if (isListening) {
+                            speechRecognizer?.stopListening()
+                            isListening = false
+                        } else {
+                            if (speechRecognizer == null) return@FloatingActionButton
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        }
+                    },
+                    containerColor = if (isListening) Color(0xFFEF4444) else Color(0xFF10B981),
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(48.dp),
+                    elevation = FloatingActionButtonDefaults.elevation(
+                        defaultElevation = 4.dp,
+                        pressedElevation = 8.dp
+                    )
+                ) {
+                    Icon(
+                        if (isListening) Icons.Filled.Stop else Icons.Filled.Mic,
+                        contentDescription = if (isListening) "Detener voz" else "Hablar",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                FloatingActionButton(
+                    onClick = {
                         if (inputText.isNotBlank() && !isAiTyping) {
                             val textToSend = inputText
                             inputText = ""
@@ -171,6 +269,43 @@ fun AiChatScreen(
             }
         }
     }
+}
+
+private fun startSpeechListening(
+    recognizer: SpeechRecognizer,
+    onListening: (Boolean) -> Unit,
+    onText: (String) -> Unit
+) {
+    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
+    }
+    recognizer.setRecognitionListener(object : RecognitionListener {
+        override fun onReadyForSpeech(params: android.os.Bundle?) {
+            onListening(true)
+        }
+        override fun onBeginningOfSpeech() {}
+        override fun onRmsChanged(rmsdB: Float) {}
+        override fun onBufferReceived(buffer: ByteArray?) {}
+        override fun onEndOfSpeech() {
+            onListening(false)
+        }
+        override fun onError(error: Int) {
+            onListening(false)
+        }
+        override fun onResults(results: android.os.Bundle?) {
+            onListening(false)
+            val spoken = results
+                ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                ?.firstOrNull()
+                .orEmpty()
+            onText(spoken)
+        }
+        override fun onPartialResults(partialResults: android.os.Bundle?) {}
+        override fun onEvent(eventType: Int, params: android.os.Bundle?) {}
+    })
+    recognizer.startListening(intent)
 }
 
 @Composable

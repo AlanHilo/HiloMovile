@@ -12,8 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.*import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +54,9 @@ fun ChatDetailScreen(
     val messages by messagesViewModel.messages.collectAsState()
     val isInitialLoading by messagesViewModel.isInitialLoading.collectAsState()
     val isLoadingMore by messagesViewModel.isLoadingMore.collectAsState()
+    val isRefreshing by messagesViewModel.isRefreshing.collectAsState()
+    val searchResults by messagesViewModel.searchResults.collectAsState()
+    val isSearching by messagesViewModel.isSearching.collectAsState()
 
     LaunchedEffect(chat.id) {
         messagesViewModel.loadMessages(chat.id)
@@ -73,6 +75,36 @@ fun ChatDetailScreen(
     }
     var textState by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
+
+    // Search state
+    var isSearchOpen by remember { mutableStateOf(false) }
+    var searchText by remember { mutableStateOf("") }
+
+    // Export CSV state
+    var showMoreMenu    by remember { mutableStateOf(false) }
+    var showExportDialog by remember { mutableStateOf(false) }
+    var exportFromDate   by remember { mutableStateOf("") }
+    var exportToDate     by remember { mutableStateOf("") }
+    var isExporting      by remember { mutableStateOf(false) }
+    var exportMessage    by remember { mutableStateOf<String?>(null) }
+
+    // Debounced search — waits 450ms after the user stops typing
+    LaunchedEffect(searchText) {
+        if (searchText.isNotBlank()) {
+            kotlinx.coroutines.delay(450)
+            messagesViewModel.performSearch(searchText)
+        } else {
+            messagesViewModel.clearSearch()
+        }
+    }
+
+    // Clear search when search bar is closed
+    LaunchedEffect(isSearchOpen) {
+        if (!isSearchOpen) {
+            searchText = ""
+            messagesViewModel.clearSearch()
+        }
+    }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -376,6 +408,85 @@ fun ChatDetailScreen(
         }
     }
 
+    // Export CSV dialog
+    if (showExportDialog) {
+        AlertDialog(
+            onDismissRequest = { if (!isExporting) showExportDialog = false },
+            title = { Text("Exportar mensajes", fontWeight = FontWeight.SemiBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "Rango de fechas opcional (AAAA-MM-DD).\nDeja vacío para exportar todo.",
+                        fontSize = 13.sp,
+                        color = Color(0xFF6B7280)
+                    )
+                    OutlinedTextField(
+                        value = exportFromDate,
+                        onValueChange = { exportFromDate = it },
+                        label = { Text("Desde (opcional)") },
+                        placeholder = { Text("2025-01-01") },
+                        singleLine = true,
+                        enabled = !isExporting,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = exportToDate,
+                        onValueChange = { exportToDate = it },
+                        label = { Text("Hasta (opcional)") },
+                        placeholder = { Text("2025-12-31") },
+                        singleLine = true,
+                        enabled = !isExporting,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    exportMessage?.let { msg ->
+                        val isError = msg.startsWith("Error")
+                        Text(
+                            text = msg,
+                            color = if (isError) Color(0xFFDC2626) else Color(0xFF10B981),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                if (isExporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                        color = Color(0xFF10B981)
+                    )
+                } else {
+                    TextButton(
+                        onClick = {
+                            isExporting = true
+                            exportMessage = null
+                            messagesViewModel.exportCsv(
+                                from = exportFromDate.trim().ifBlank { null },
+                                to   = exportToDate.trim().ifBlank { null }
+                            ) { success, msg ->
+                                isExporting = false
+                                exportMessage = if (success) "✅ Guardado en $msg" else "Error: $msg"
+                            }
+                        }
+                    ) {
+                        Text("Exportar", color = Color(0xFF10B981), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showExportDialog = false },
+                    enabled = !isExporting
+                ) {
+                    Text("Cancelar", color = Color.Gray)
+                }
+            },
+            containerColor = Color.White,
+            shape = RoundedCornerShape(16.dp)
+        )
+    }
+
     // Pagination trigger
     LaunchedEffect(listState) {
         snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }
@@ -398,8 +509,27 @@ fun ChatDetailScreen(
                     shadowElevation = 2.dp
                 ) {
                     TopAppBar(
-                        title = { 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                        title = {
+                            if (isSearchOpen) {
+                                OutlinedTextField(
+                                    value = searchText,
+                                    onValueChange = { searchText = it },
+                                    placeholder = { Text("Buscar mensajes...", color = Color(0xFF8E8E93), fontSize = 14.sp) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(20.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = Color.Black,
+                                        unfocusedTextColor = Color.Black,
+                                        focusedBorderColor = Color(0xFF10B981),
+                                        unfocusedBorderColor = Color(0xFFE5E5EA),
+                                        cursorColor = Color(0xFF10B981),
+                                        focusedContainerColor = Color(0xFFF2F2F7),
+                                        unfocusedContainerColor = Color(0xFFF2F2F7)
+                                    ),
+                                    modifier = Modifier.fillMaxWidth().padding(end = 8.dp, top = 4.dp, bottom = 4.dp)
+                                )
+                            } else {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
                                 // Avatar with ring
                                 Box(
                                     modifier = Modifier
@@ -486,11 +616,50 @@ fun ChatDetailScreen(
                                         )
                                     }
                                 }
+                                }
                             }
                         },
                         navigationIcon = {
-                            IconButton(onClick = onBack) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.Black)
+                            IconButton(onClick = {
+                                if (isSearchOpen) {
+                                    isSearchOpen = false
+                                } else {
+                                    onBack()
+                                }
+                            }) {
+                                Icon(
+                                    if (isSearchOpen) Icons.Default.Close else Icons.Default.ArrowBack,
+                                    contentDescription = if (isSearchOpen) "Cerrar búsqueda" else "Back",
+                                    tint = Color.Black
+                                )
+                            }
+                        },
+                        actions = {
+                            if (!isSearchOpen) {
+                                IconButton(onClick = { isSearchOpen = true }) {
+                                    Icon(Icons.Default.Search, contentDescription = "Buscar", tint = Color.Black)
+                                }
+                                Box {
+                                    IconButton(onClick = { showMoreMenu = true }) {
+                                        Icon(Icons.Default.MoreVert, contentDescription = "Más opciones", tint = Color.Black)
+                                    }
+                                    DropdownMenu(
+                                        expanded = showMoreMenu,
+                                        onDismissRequest = { showMoreMenu = false }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text("Exportar CSV") },
+                                            leadingIcon = { Icon(Icons.Default.Download, contentDescription = null) },
+                                            onClick = {
+                                                showMoreMenu = false
+                                                exportFromDate = ""
+                                                exportToDate = ""
+                                                exportMessage = null
+                                                showExportDialog = true
+                                            }
+                                        )
+                                    }
+                                }
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
@@ -780,6 +949,45 @@ fun ChatDetailScreen(
                         )
                     }
                 }
+            } else if (searchResults != null) {
+                // Search results view
+                when {
+                    isSearching -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(paddingValues).background(Color(0xFFF9F9FB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(color = Color(0xFF10B981), strokeWidth = 3.dp)
+                        }
+                    }
+                    searchResults!!.isEmpty() -> {
+                        Box(
+                            modifier = Modifier.fillMaxSize().padding(paddingValues).background(Color(0xFFF9F9FB)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("🔍", fontSize = 40.sp)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text("Sin resultados para \"$searchText\"", color = Color(0xFF8E8E93), fontSize = 14.sp)
+                            }
+                        }
+                    }
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize().padding(paddingValues).background(Color(0xFFF9F9FB)),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            items(searchResults!!, key = { it.id }) { message ->
+                                MessageBubble(
+                                    message = message,
+                                    isGroup = chat.id.endsWith("@g.us"),
+                                    onMediaClick = {}
+                                )
+                            }
+                        }
+                    }
+                }
             } else if (messages.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -799,37 +1007,72 @@ fun ChatDetailScreen(
                     }
                 }
             } else {
-                LazyColumn(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(paddingValues)
-                        .background(Color(0xFFF9F9FB)),
-                    state = listState,
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    reverseLayout = true
+                        .background(Color(0xFFF9F9FB))
                 ) {
-                    items(messages, key = { it.id }) { message ->
-                        MessageBubble(
-                            message = message,
-                            isGroup = chat.id.endsWith("@g.us"),
-                            onMediaClick = { clickedMessage ->
-                                checkAndShowMedia(clickedMessage)
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        state = listState,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        reverseLayout = true
+                    ) {
+                        items(messages, key = { "${chat.id}_${it.id}" }) { message ->
+                            MessageBubble(
+                                message = message,
+                                isGroup = chat.id.endsWith("@g.us"),
+                                onMediaClick = { clickedMessage ->
+                                    checkAndShowMedia(clickedMessage)
+                                }
+                            )
+                        }
+                        if (isLoadingMore) {
+                            item {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    CircularProgressIndicator(
+                                        color = Color.Black,
+                                        strokeWidth = 2.dp,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
-                        )
+                        }
                     }
-                    if (isLoadingMore) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 16.dp),
-                                contentAlignment = Alignment.Center
+
+                    // Lightweight loading overlay for heavy refresh processes.
+                    AnimatedVisibility(
+                        visible = isRefreshing && messages.isNotEmpty(),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 8.dp)
+                    ) {
+                        Surface(
+                            color = Color.Black.copy(alpha = 0.75f),
+                            shape = RoundedCornerShape(20.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
                             ) {
                                 CircularProgressIndicator(
-                                    color = Color.Black,
+                                    color = Color.White,
                                     strokeWidth = 2.dp,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Sincronizando mensajes...",
+                                    color = Color.White,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
                             }
                         }
@@ -958,12 +1201,57 @@ fun MessageBubble(
                     )
                 }
 
-                if (message.mediaUrl != null) {
-                    val clickModifier = Modifier.clickable {
-                        onMediaClick(message)
+                val isMediaMessage = message.type == "image" || message.type == "video" ||
+                        message.type == "sticker" || message.type == "audio" ||
+                        message.type == "document" || message.type == "ptt"
+
+                if (message.mediaUrl != null || isMediaMessage) {
+                    val clickModifier = if (message.mediaUrl != null) {
+                        Modifier.clickable { onMediaClick(message) }
+                    } else {
+                        Modifier
                     }
 
-                    if (message.type == "image" || message.type == "sticker") {
+                    if (message.mediaUrl == null) {
+                        // Media detected but no downloadable URL available
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFFF2F2F7).copy(alpha = 0.6f), shape = RoundedCornerShape(10.dp))
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = when (message.type) {
+                                    "image", "sticker" -> Icons.Default.Image
+                                    "video" -> Icons.Default.PlayCircle
+                                    "audio", "ptt" -> Icons.Default.VolumeUp
+                                    else -> Icons.Default.Description
+                                },
+                                contentDescription = "Multimedia",
+                                tint = Color(0xFF8E8E93),
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = when (message.type) {
+                                        "image" -> "Imagen"
+                                        "sticker" -> "Sticker"
+                                        "video" -> "Video"
+                                        "audio" -> "Audio"
+                                        "ptt" -> "Nota de voz"
+                                        else -> "Documento"
+                                    },
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color.Black
+                                )
+                                Text("No disponible para descargar", fontSize = 11.sp, color = Color.Gray)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                    } else if (message.type == "image" || message.type == "sticker") {
                         SubcomposeAsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
                                 .data(message.mediaUrl)
